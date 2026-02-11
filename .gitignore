@@ -1,0 +1,15 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore datasets
+Data/MiningMix_Unified/train/*
+Data/MiningMix_Unified/test/*
+Data/MiningMix_Unified/val/*
+
+#Ignore Yolo Model
+yolov8n.pt
+
+# Ignore environment files
+venv
+.env

@@ -1,0 +1,22 @@
+DsDPM_Original Dataset [Images count by class]
+
+drill_pipe (train set) - 21,448 (1280 x 720)
+drill_pipe (val set) - 5,394 (1280 x 720)
+
+drill_rig (train set) - 12,224 (1280 x 720)
+drill_rig (val set) - 3,087 (1280 x 720)
+
+interaction_between_miner_and_drill_pipe (train set) - 11,272 (1280 x 720)
+interaction_between_miner_and_drill_pipe (val set) - 2,847 (1280 x 720)
+
+coal_miner (train set) - 12,461 (1280 x 720)
+coal_miner (val set) - 3,145 (1280 x 720)
+
+compressed_oxygen_self_rescuer (train set) - 15,809 (1280 x 720)
+compressed_oxygen_self_rescuer (val set) - 3,977 (1280 x 720)
+
+mining_helmet (train set) - 10,719 (1280 x 720)
+mining_helmet (val set) - 2,713 (1280 x 720)
+
+Total (Train Set) = 21,448 + 5,394 + 12,224 + 3,087 + 11,272 + 2,847 + 12,461 + 3,145 + 15,809 + 3,977 + 10,719 + 2,713
+		  = 105,096
