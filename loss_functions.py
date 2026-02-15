@@ -11,7 +11,6 @@ class AdaLOLIELoss(nn.Module):
         self.register_buffer("k_up", torch.tensor([[0, -1, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
         self.register_buffer("k_down", torch.tensor([[0, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
 
-    # ###
     def get_exposure_loss(self, enhanced, patch_size=16, mean_val=0.55): 
         pool = nn.AvgPool2d(patch_size)
         mean_curr = pool(enhanced)
@@ -25,7 +24,6 @@ class AdaLOLIELoss(nn.Module):
         d_gb = torch.pow(mb - mg, 2)
         return torch.mean(torch.pow(torch.sqrt(d_rg + d_rb + d_gb), 2))
 
-    # ###
     def get_spatial_loss(self, enhanced, original):
         # Downsample
         pool = nn.AvgPool2d(4)
@@ -39,7 +37,6 @@ class AdaLOLIELoss(nn.Module):
         enh_p_gray = enh_p_gray.unsqueeze(1)
         org_p_gray = org_p_gray.unsqueeze(1)
 
-        # ###
         # Create Mask
         mask = (org_p_gray > 0.05).float()
 
@@ -51,7 +48,6 @@ class AdaLOLIELoss(nn.Module):
         
         masked_loss = (d_left + d_right + d_up + d_down) * mask
 
-        # ###
         # Normalize by Fixed Area, NOT Mask Sum
         # This prevents explosion when mask is nearly empty (pitch black images).
         batch, channel, h, w = org_p_gray.shape
@@ -61,7 +57,6 @@ class AdaLOLIELoss(nn.Module):
         min_channel, _ = torch.min(enhanced, dim=1, keepdim=True)
         return torch.mean(min_channel)
     
-    # ###
     def get_glare_loss(self, enhanced, limit=0.85):
         return torch.mean(F.relu(enhanced - limit))
 
