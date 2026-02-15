@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-# ###
 class DepthwiseSeparableConv(nn.Module):
     def __init__(self, in_ch, out_ch):
         super(DepthwiseSeparableConv, self).__init__()
@@ -12,7 +11,6 @@ class DepthwiseSeparableConv(nn.Module):
     def forward(self, x):
         return self.relu(self.pointwise(self.depthwise(x)))
 
-# ###
 class SpatialAttention(nn.Module):
     def __init__(self):
         super(SpatialAttention, self).__init__()
@@ -30,7 +28,6 @@ class AdaLOLIE_Net(nn.Module):
         super(AdaLOLIE_Net, self).__init__()
         number_f = 32
         
-        # ###
         self.e_conv1 = DepthwiseSeparableConv(3, number_f) 
         self.e_conv2 = DepthwiseSeparableConv(number_f, number_f)
 
@@ -56,7 +53,6 @@ class AdaLOLIE_Net(nn.Module):
         x1 = self.e_conv1(x)
         x2 = self.e_conv2(x1)
         
-        # ### SPEAK: "Here, the attention map weights the features before the final curve estimation."
         # Adaptive Attention
         attn_map = self.attention(x2)
         x2 = x2 * attn_map 
@@ -64,13 +60,11 @@ class AdaLOLIE_Net(nn.Module):
         x3 = self.e_conv3(x2)
         x4 = self.e_conv4(x3)
         
-        # ###
         # Tanh Activation
         # Forces parameters to be between -1 and 1.
         # WITHOUT THIS, IMAGE TURNS GRAY/WHITE.
         curve_params = torch.tanh(self.e_conv5(x4))
         
-        # ###
         # Curve Application
         r1, r2, r3, r4, r5, r6, r7, r8 = torch.split(curve_params, 3, dim=1)
         
