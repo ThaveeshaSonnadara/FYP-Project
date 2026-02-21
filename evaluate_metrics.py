@@ -14,8 +14,9 @@ from model import AdaLOLIE_Net
 
 # --- CONFIG ---
 MODEL_PATH = "checkpoints/adalolie_best.pth"
-TEST_DIR = "Data/DsDPM_Original" # Ground Truth source
+TEST_DIR = "Data/MiningMix_Unified/test" # Ground Truth source
 NUM_TEST_IMAGES = 100
+SAVE_PTH = "Output/Evaluation Metrics/"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- REALISTIC DEGRADATION FUNCTIONS (Matches Training!) ---
@@ -120,7 +121,7 @@ def evaluate():
     avg_speed = np.mean(inference_times)
 
     # 1. Save Text Report
-    with open("metrics_summary.txt", "w") as f:
+    with open(SAVE_PTH + "metrics_summary.txt", "w") as f:
         f.write(f"AdaLOLIE Evaluation Report\n")
         f.write(f"==========================\n")
         f.write(f"Images Tested: {len(psnr_scores)}\n")
@@ -147,13 +148,13 @@ def evaluate():
     plt.ylabel("Time (ms)")
     
     plt.tight_layout()
-    plt.savefig("graph_metrics_distribution.png")
+    plt.savefig(SAVE_PTH + "graph_metrics_distribution.png")
     
     # 3. Save Sample Image (Visual Proof)
     if sample_vis:
         clean, dirty, enhanced = sample_vis
         combined = np.hstack((clean, dirty, enhanced))
-        cv2.imwrite("sample_evaluation_triplet.png", combined)
+        cv2.imwrite(SAVE_PTH + "sample_evaluation_triplet.png", combined)
 
     print(f"\n✅ Evaluation Complete!")
     print(f"   Avg PSNR: {avg_psnr:.2f} dB")
