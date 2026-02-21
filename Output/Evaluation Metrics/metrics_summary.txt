@@ -1,0 +1,6 @@
+AdaLOLIE Evaluation Report
+==========================
+Images Tested: 100
+Avg PSNR: 23.66 dB
+Avg SSIM: 0.9209
+Avg Time: 51.75 ms
