@@ -1,3 +1,7 @@
+# 1. Comet Integration Imports
+import comet_ml
+from comet_ml.integration.pytorch import watch, log_model
+
 import torch
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
@@ -6,53 +10,43 @@ import glob
 import os
 import numpy as np
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-import pandas as pd
 
 # Import Local Modules
 from model import AdaLOLIE_Net
 from loss_functions import AdaLOLIELoss
+# Import metrics for the testing part
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
 
-# DATASET CLASS
+# --- DATASET CLASS ---
 class MiningDataset(Dataset):
     def __init__(self, folder_path, limit=None):
         self.image_paths = sorted(glob.glob(os.path.join(folder_path, "*.*")))
         self.image_paths = [x for x in self.image_paths if x.lower().endswith(('.png', '.jpg', '.jpeg'))]
         
-        # If we asked for a limit, shuffle and pick only that many
         if limit is not None and len(self.image_paths) > limit:
             import random
-            random.seed(42) # Keep it consistent every time you run
+            random.seed(42)
             random.shuffle(self.image_paths)
             self.image_paths = self.image_paths[:limit]
-            print(f"⚠️ DEBUG MODE: Truncated dataset to {len(self.image_paths)} images!")
 
     def __len__(self): return len(self.image_paths)
 
     def __getitem__(self, idx):
         try:
-            # 1. Read Image (OpenCV reads as BGR by default)
             img = cv2.imread(self.image_paths[idx])
             if img is None: return torch.zeros(3, 256, 256) 
-            
-            # Convert BGR to RGB
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-            # 2. Resize & Normalize
             img = cv2.resize(img, (256, 256))
             img = (np.asarray(img)/255.0).astype(np.float32)
-            
-            # 3. Create Tensor
-            img_tensor = torch.from_numpy(img).permute(2, 0, 1)
-
-            return img_tensor
+            return torch.from_numpy(img).permute(2, 0, 1)
         except:
             return torch.zeros(3, 256, 256)
 
-# TRAIN SCRIPT CLASS
+# --- TRAIN SCRIPT CLASS ---
 class TrainScript:
-    def __init__(self):
-        # CONFIGURATION
+    def __init__(self, exp_obj):
+        self.exp_obj = exp_obj
         self.BATCH_SIZE = 16
         self.LEARNING_RATE = 1e-4
         self.NUM_EPOCHS = 30
@@ -60,150 +54,122 @@ class TrainScript:
         self.LOG_FILE = "training_log.csv"
         self.RESUME_CHECKPOINT = os.path.join(self.SAVE_DIR, "latest_checkpoint.pth")
         
-        # POINTS TO DATA
         self.TRAIN_PATH = "Data/MiningMix_Unified/train"
         self.VAL_PATH = "Data/MiningMix_Unified/val"
+        self.TEST_PATH = "Data/MiningMix_Unified/test"
         
-        # Setup Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"💻 Training on: {self.device}")
 
-    def weights_init(self, m):
-        """
-        Placeholder for explicit weight initialization if needed.
-        """
-        if isinstance(m, torch.nn.Conv2d):
-            torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-        elif isinstance(m, torch.nn.BatchNorm2d):
-            torch.nn.init.constant_(m.weight, 1)
-            torch.nn.init.constant_(m.bias, 0)
+    def run_test_evaluation(self, model):
+        """Logs PSNR and SSIM accuracy to Comet during the test phase"""
+        print("\n🧪 Running Test Evaluation...")
+        model.eval()
+        
+        # Using a subset for quick logging during training, or full set at the end
+        test_files = glob.glob(os.path.join(self.TEST_PATH, "**", "*.jpg"), recursive=True)[:50]
+        psnr_scores, ssim_scores = [], []
 
-    def plot_training_curves(self):
-        try:
-            if not os.path.exists(self.LOG_FILE):
-                print("Log file not found, skipping plot.")
-                return
+        # Wrap in Comet test context
+        # with self.exp_obj.test():
+        with torch.no_grad():
+            for img_path in tqdm(test_files, desc="Testing"):
+                    clean_raw = cv2.imread(img_path)
+                    if clean_raw is None: continue
+                    clean = cv2.resize(clean_raw, (256, 256))
+                    
+                    # Normalizing for model
+                    img_tensor = (clean / 255.0).astype(np.float32)
+                    img_tensor = torch.from_numpy(img_tensor).permute(2, 0, 1).unsqueeze(0).to(self.device)
 
-            df = pd.read_csv(self.LOG_FILE)
-            plt.figure(figsize=(10, 6))
-            plt.plot(df['epoch'], df['train_loss'], label='Training Loss', color='blue')
-            plt.plot(df['epoch'], df['val_loss'], label='Validation Loss', color='orange')
-            plt.title('AdaLOLIE Training Progress')
-            plt.xlabel('Epochs')
-            plt.ylabel('Loss')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.SAVE_DIR, "loss_curve.png"))
-            print(f"📉 Training curves saved to {self.SAVE_DIR}/loss_curve.png")
-        except Exception as e: 
-            print(f"Error in plot_training_curves: {e}")
+                    enhanced_tensor = model(img_tensor)
+                    
+                    # Post-process for metrics
+                    enhanced = enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
+                    enhanced = np.clip(enhanced * 255, 0, 255).astype(np.uint8)
+                    clean_rgb = cv2.cvtColor(clean, cv2.COLOR_BGR2RGB)
+
+                    psnr_scores.append(psnr(clean_rgb, enhanced))
+                    ssim_scores.append(ssim(clean_rgb, enhanced, channel_axis=2, data_range=255))
+
+            # Log average metrics to Comet
+            avg_psnr = np.mean(psnr_scores)
+            avg_ssim = np.mean(ssim_scores)
+            self.exp_obj.log_metric("Avarage PSNR", avg_psnr)
+            self.exp_obj.log_metric("Avarage SSIM", avg_ssim)
+            print(f"✅ Test Metrics Logged -> PSNR: {avg_psnr:.2f}, SSIM: {avg_ssim:.4f}")
 
     def train(self):
         model = AdaLOLIE_Net().to(self.device)
-        # Optional: Apply specific weight init if want to use the method
-        # model.apply(self.weights_init) 
-        
         loss_fn = AdaLOLIELoss().to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=self.LEARNING_RATE)
         
+        # Log Hyperparameters to Comet
+        hyper_params = {"batch_size": self.BATCH_SIZE, "learning_rate": self.LEARNING_RATE, "epochs": self.NUM_EPOCHS}
+        self.exp_obj.log_parameters(hyper_params)
+
+        # Watch model for weights/gradients histograms
+        watch(model) 
+
         if not os.path.exists(self.SAVE_DIR): os.makedirs(self.SAVE_DIR)
         
-        # Auto-Resume Logic
         start_epoch = 0
         best_val_loss = float('inf')
         
-        if os.path.exists(self.RESUME_CHECKPOINT):
-            print(f"🔄 Checkpoint found! Resuming...")
-            checkpoint = torch.load(self.RESUME_CHECKPOINT, map_location=self.device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            start_epoch = checkpoint['epoch'] + 1
-            best_val_loss = checkpoint.get('best_val_loss', float('inf'))
-        else:
-            print("🆕 Starting fresh training.")
-            if not os.path.exists(self.LOG_FILE):
-                with open(self.LOG_FILE, "w") as f: f.write("epoch,train_loss,val_loss\n")
+        # Load data
+        train_loader = DataLoader(MiningDataset(self.TRAIN_PATH, limit=250), batch_size=self.BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(MiningDataset(self.VAL_PATH, limit=50), batch_size=self.BATCH_SIZE, shuffle=False)
 
-        # limit=None means use ALL images.
-        train_loader = DataLoader(
-            MiningDataset(self.TRAIN_PATH, limit=None), 
-            batch_size=self.BATCH_SIZE, 
-            shuffle=True, 
-            num_workers=0
-        )
-        
-        val_loader = DataLoader(
-            MiningDataset(self.VAL_PATH, limit=None), 
-            batch_size=self.BATCH_SIZE, 
-            shuffle=False, 
-            num_workers=0
-        )
-        
+        # Comet Training Context
+        # with self.exp_obj.train(): 
         for epoch in range(start_epoch, self.NUM_EPOCHS):
-            # TRAINING PHASE
-            model.train()
-            train_loss = 0.0
-            loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.NUM_EPOCHS} [Train]")
-            
-            for imgs in loop:
-                imgs = imgs.to(self.device)
-                enhanced = model(imgs)
-                loss = loss_fn(enhanced, imgs)
+                model.train()
+                train_loss = 0.0
+                loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.NUM_EPOCHS}")
                 
-                optimizer.zero_grad()
-                loss.backward()
-                
-                # GRADIENT CLIPPING
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
-                optimizer.step()
-                train_loss += loss.item()
-                loop.set_postfix(loss=loss.item())
-
-            avg_train_loss = train_loss / len(train_loader)
-
-            # VALIDATION PHASE
-            model.eval()
-            val_loss = 0.0
-            val_loop = tqdm(val_loader, desc=f"Epoch {epoch+1}/{self.NUM_EPOCHS} [Val  ]")
-            
-            with torch.no_grad():
-                for imgs in val_loop:
+                for imgs in loop:
                     imgs = imgs.to(self.device)
-                    val_loss += loss_fn(model(imgs), imgs).item()
-                    val_loop.set_postfix(loss=val_loss / (val_loop.n + 1))
-            
-            avg_val_loss = val_loss / len(val_loader)
-            
-            print(f"--> Epoch {epoch+1} | Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f}")
-            
-            with open(self.LOG_FILE, "a") as f:
-                f.write(f"{epoch+1},{avg_train_loss:.6f},{avg_val_loss:.6f}\n")
+                    enhanced = model(imgs)
+                    loss = loss_fn(enhanced, imgs)
+                    
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    
+                    train_loss += loss.item()
+                    loop.set_postfix(loss=loss.item())
 
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
-                torch.save(model.state_dict(), os.path.join(self.SAVE_DIR, "adalolie_best.pth"))
-                print("    🌟 Best Model Updated!")
-            
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'best_val_loss': best_val_loss,
-                'loss': avg_train_loss
-            }, self.RESUME_CHECKPOINT)
-            
-            if (epoch + 1) % 10 == 0:
-                torch.save(model.state_dict(), os.path.join(self.SAVE_DIR, f"adalolie_epoch_{epoch+1}.pth"))
+                avg_train_loss = train_loss / len(train_loader)
+                self.exp_obj.log_metric("Train Loss", avg_train_loss, step=epoch)
+                self.exp_obj.log_current_epoch(epoch)
+
+                # Validation
+                model.eval()
+                val_loss = 0.0
+                with torch.no_grad():
+                    for imgs in val_loader:
+                        imgs = imgs.to(self.device)
+                        val_loss += loss_fn(model(imgs), imgs).item()
                 
-            # Update plot every epoch
-            self.plot_training_curves()
+                avg_val_loss = val_loss / len(val_loader)
+                self.exp_obj.log_metric("Validation Loss", avg_val_loss, step=epoch)
+
+                if avg_val_loss < best_val_loss:
+                    best_val_loss = avg_val_loss
+                    torch.save(model.state_dict(), os.path.join(self.SAVE_DIR, "adalolie_best.pth"))
+            
+        
+        # Run final test evaluation and log to Comet
+        self.run_test_evaluation(model)
+        
+        # Save and Log the final model to Comet Registry
+        log_model(self.exp_obj, model, "AdaLOLIE-Net-Mining")
 
 if __name__ == "__main__":
-    trainer = TrainScript()
+    # Initialize Comet
+    experiment = comet_ml.start(project_name="AdaLOLIE-Mining-Safety")
     
-    # Run training:
+    trainer = TrainScript(experiment)
     trainer.train()
-    
-    # Run only plotting:
-    # trainer.plot_training_curves()
+
+    experiment.end()
