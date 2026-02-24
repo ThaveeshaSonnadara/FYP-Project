@@ -1,15 +1,22 @@
 import torch
 import torch.nn as nn
 
-class DepthwiseSeparableConv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(DepthwiseSeparableConv, self).__init__()
-        self.depthwise = nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1, groups=in_ch)
-        self.pointwise = nn.Conv2d(in_ch, out_ch, kernel_size=1)
-        self.relu = nn.ReLU(inplace=True)
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        return self.relu(self.pointwise(self.depthwise(x)))
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        return self.sigmoid(avg_out + max_out)
 
 class SpatialAttention(nn.Module):
     def __init__(self):
@@ -26,55 +33,37 @@ class SpatialAttention(nn.Module):
 class AdaLOLIE_Net(nn.Module):
     def __init__(self):
         super(AdaLOLIE_Net, self).__init__()
-        number_f = 32
+        nf = 32
+        self.e_conv1 = nn.Conv2d(3, nf, 3, 1, 1)
+        self.e_conv2 = nn.Conv2d(nf, nf, 3, 1, 1)
+        self.e_conv3 = nn.Conv2d(nf, nf, 3, 1, 1)
         
-        self.e_conv1 = DepthwiseSeparableConv(3, number_f) 
-        self.e_conv2 = DepthwiseSeparableConv(number_f, number_f)
-
-        # Injecting Attention here
-        self.attention = SpatialAttention()
-
-        self.e_conv3 = DepthwiseSeparableConv(number_f, number_f)
-        self.e_conv4 = DepthwiseSeparableConv(number_f, number_f)
-        self.e_conv5 = nn.Conv2d(number_f, 24, 3, 1, 1, bias=True)
+        # Dual Attention Module
+        self.ca = ChannelAttention(nf)
+        self.sa = SpatialAttention()
         
-        # --- REQUIREMENT 1: Weight Initialization ---
-        # Forces the model to start in a "safe" state
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.normal_(m.weight, 0, 0.02)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+        self.e_conv4 = nn.Conv2d(nf, nf, 3, 1, 1)
+        self.e_conv5 = nn.Conv2d(nf, 24, 3, 1, 1)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        x1 = self.e_conv1(x)
-        x2 = self.e_conv2(x1)
+        identity = x
+        x1 = self.relu(self.e_conv1(x))
+        x2 = self.relu(self.e_conv2(x1))
+        x3 = self.relu(self.e_conv3(x2))
         
-        # Adaptive Attention
-        attn_map = self.attention(x2)
-        x2 = x2 * attn_map 
+        # Apply Dual Attention
+        x3 = self.ca(x3) * x3
+        x3 = self.sa(x3) * x3
         
-        x3 = self.e_conv3(x2)
-        x4 = self.e_conv4(x3)
-        
-        # Tanh Activation
-        # Forces parameters to be between -1 and 1.
-        # WITHOUT THIS, IMAGE TURNS GRAY/WHITE.
+        x4 = self.relu(self.e_conv4(x3))
+        # Curve parameters constrained by Tanh
         curve_params = torch.tanh(self.e_conv5(x4))
+        r_list = torch.split(curve_params, 3, dim=1)
         
-        # Curve Application
-        r1, r2, r3, r4, r5, r6, r7, r8 = torch.split(curve_params, 3, dim=1)
-        
-        x = x + r1 * (torch.pow(x, 2) - x)
-        x = x + r2 * (torch.pow(x, 2) - x)
-        x = x + r3 * (torch.pow(x, 2) - x)
-        x = x + r4 * (torch.pow(x, 2) - x)
-        x = x + r5 * (torch.pow(x, 2) - x)
-        x = x + r6 * (torch.pow(x, 2) - x)
-        x = x + r7 * (torch.pow(x, 2) - x)
-        enhanced_image = x + r8 * (torch.pow(x, 2) - x)
-        
-        return enhanced_image
+        # Iterative Enhancement with Residual Connection
+        enhanced = identity
+        for r in r_list:
+            enhanced = enhanced + r * (torch.pow(enhanced, 2) - enhanced)
+            
+        return enhanced

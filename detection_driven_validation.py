@@ -1,109 +1,117 @@
 import torch
 import cv2
-import matplotlib.pyplot as plt
-from ultralytics import YOLO
-from model import AdaLOLIE_Net
-import numpy as np
-import glob
-import random
 import os
+import glob
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from ultralytics import YOLO
+from tqdm import tqdm
+import comet_ml
 
-MODEL_PATH = "checkpoints/adalolie_best.pth"
-TEST_FOLDER = "Data/MiningMix_Unified/test"
-INFERENCE_SIZE = (640, 640)
-OUTPUT_DIR = "Output"
+# Import local modules
+from model import AdaLOLIE_Net
 
-def run_validation():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running validation on: {device}")
-
-    enhancer = AdaLOLIE_Net().to(device)
-    if os.path.exists(MODEL_PATH):
-        checkpoint = torch.load(MODEL_PATH, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            enhancer.load_state_dict(checkpoint['model_state_dict'])
+class SafetyPerformanceEvaluator:
+    def __init__(self, model_path="checkpoints/adalolie_best.pth", yolo_path="yolov8n.pt"):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # 1. Load AdaLOLIE Enhancer (Dual-Attention Aware)
+        self.enhancer = AdaLOLIE_Net().to(self.device)
+        checkpoint = torch.load(model_path, map_location=self.device)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            self.enhancer.load_state_dict(checkpoint['model_state_dict'])
         else:
-            enhancer.load_state_dict(checkpoint)
-        print(f"✅ Loaded AdaLOLIE model: {MODEL_PATH}")
-    else:
-        print(f"❌ Error: Model not found at {MODEL_PATH}")
-        return
-    enhancer.eval()
+            self.enhancer.load_state_dict(checkpoint)
+        self.enhancer.eval()
+        
+        # 2. Load YOLO Detector
+        self.detector = YOLO(yolo_path)
+        
+        # 3. Comet Experiment for Result Tracking
+        self.experiment = comet_ml.start(project_name="AdaLOLIE-Safety-Performance")
+        
+        # Target classes (0 = 'person' in COCO). Adjust if using custom mining weights.
+        self.target_classes = [0] 
+        self.test_dir = "Data/MiningMix_Unified/test"
+        self.output_dir = "Output/Safety_Report"
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
-    detector = YOLO("yolov8n.pt") # default model
+    def process_image(self, img_path):
+        img_bgr = cv2.imread(img_path)
+        if img_bgr is None: return None
+        
+        # Standardize to RGB for consistent enhancement
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        h, w, _ = img_rgb.shape
+        
+        # Pre-process (256x256)
+        input_img = cv2.resize(img_rgb, (256, 256))
+        img_tensor = (input_img / 255.0).astype(np.float32)
+        img_tensor = torch.from_numpy(img_tensor).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        
+        # Enhance
+        with torch.no_grad():
+            enhanced_tensor = self.enhancer(img_tensor)
+        
+        # Post-process & Restore to original resolution for YOLO
+        enhanced_img = (enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        enhanced_high_res = cv2.resize(enhanced_img, (w, h))
+        
+        return img_rgb, enhanced_high_res
 
-    # Setup specific test image or random
-    img_path = "Output/test_image.jpg"
-    # img_path = TEST_FOLDER + "/dsdpm_13934.jpg"
-    
-    # If using random from folder:
-    # test_images = glob.glob(os.path.join(TEST_FOLDER, "*.*"))
-    # test_images = [x for x in test_images if x.lower().endswith(('.jpg', '.png'))]
-    # if not test_images:
-    #     print("❌ No images found in test folder!")
-    #     return
-    # img_path = random.choice(test_images)
-    
-    print(f"Testing on image: {os.path.basename(img_path)}")
+    def run_evaluation(self, num_samples=50):
+        image_files = glob.glob(os.path.join(self.test_dir, "*.*"))
+        image_files = [f for f in image_files if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+        
+        if len(image_files) > num_samples:
+            image_files = np.random.choice(image_files, num_samples, replace=False)
+            
+        results_data = []
 
-    # 1. Read Image (BGR)
-    original = cv2.imread(img_path)
-    if original is None:
-        print(f"❌ Could not read image: {img_path}")
-        return
+        for img_path in tqdm(image_files, desc="Evaluating Safety Gain"):
+            processed = self.process_image(img_path)
+            if processed is None: continue
+            raw_rgb, enh_rgb = processed
+            
+            # 1. Detection on Raw (Dark/Dusty)
+            results_raw = self.detector(raw_rgb, verbose=False, conf=0.25)
+            # 2. Detection on AdaLOLIE Enhanced
+            results_enh = self.detector(enh_rgb, verbose=False, conf=0.25)
+            
+            conf_raw = [box.conf.item() for box in results_raw[0].boxes if int(box.cls) in self.target_classes]
+            conf_enh = [box.conf.item() for box in results_enh[0].boxes if int(box.cls) in self.target_classes]
+            
+            results_data.append({
+                "image": os.path.basename(img_path),
+                "count_raw": len(conf_raw),
+                "count_enh": len(conf_enh),
+                "avg_conf_raw": np.mean(conf_raw) if conf_raw else 0,
+                "avg_conf_enh": np.mean(conf_enh) if conf_enh else 0
+            })
 
-    # Convert BGR to RGB for Model
-    original_rgb = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
-    original_resized = cv2.resize(original_rgb, INFERENCE_SIZE)
+        # --- GENERATE RESEARCH METRICS ---
+        df = pd.DataFrame(results_data)
+        total_raw = df['count_raw'].sum()
+        total_enh = df['count_enh'].sum()
+        safety_gain = ((total_enh - total_raw) / (total_raw + 1e-6)) * 100
 
-    # 2. Enhance
-    img_tensor = (original_resized / 255.0).astype(np.float32)
-    img_tensor = torch.from_numpy(img_tensor).permute(2, 0, 1).unsqueeze(0).to(device)
+        # Log to Comet
+        self.experiment.log_metric("Safety Gain (%)", safety_gain)
+        self.experiment.log_metric("Objects Found Raw", total_raw)
+        self.experiment.log_metric("Objects Found Enhanced", total_enh)
 
-    print(f"Input Max: {img_tensor.max()}, Min: {img_tensor.min()}") 
-
-    with torch.no_grad():
-        enhanced_tensor = enhancer(img_tensor)
-    
-    enhanced_img = enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
-    enhanced_img = np.clip(enhanced_img * 255, 0, 255).astype(np.uint8)
-
-    # SAVE THE IMAGE FOR POST-PROCESSING ---
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-    
-    save_path = os.path.join(OUTPUT_DIR, "enhanced_output_test.jpg")
-    
-    # Convert RGB back to BGR before saving with OpenCV!
-    enhanced_img_bgr = cv2.cvtColor(enhanced_img, cv2.COLOR_RGB2BGR)
-    
-    cv2.imwrite(save_path, enhanced_img_bgr)
-    print(f"💾 Saved enhanced image to: {save_path}")
-    # -----------------------------------------------
-
-    # 3. Detect
-    results_original = detector(original_resized, verbose=False, conf=0.25)
-    results_enhanced = detector(enhanced_img, verbose=False, conf=0.25)
-
-    count_org = len(results_original[0].boxes)
-    count_enh = len(results_enhanced[0].boxes)
-
-    # 4. Visualize
-    fig, ax = plt.subplots(1, 2, figsize=(16, 8))
-
-    res_plotted_org = results_original[0].plot() 
-    ax[0].imshow(cv2.cvtColor(res_plotted_org, cv2.COLOR_BGR2RGB))
-    ax[0].set_title(f"Original (Dark)\nDetections: {count_org}", fontsize=14, color='red')
-    ax[0].axis('off')
-
-    res_plotted_enh = results_enhanced[0].plot()
-    ax[1].imshow(cv2.cvtColor(res_plotted_enh, cv2.COLOR_BGR2RGB))
-    title_color = 'green' if count_enh > count_org else 'black'
-    ax[1].set_title(f"AdaLOLIE Enhanced\nDetections: {count_enh}", fontsize=14, color=title_color)
-    ax[1].axis('off')
-
-    plt.tight_layout()
-    plt.show()
+        # Plot Visual Comparison
+        plt.figure(figsize=(10, 5))
+        plt.bar(['Raw (Low-Light)', 'AdaLOLIE (Enhanced)'], [total_raw, total_enh], color=['#ff4b4b', '#00d4ff'])
+        plt.title(f"Mining Safety: Object Detection Count\nSafety Gain: +{safety_gain:.1f}%")
+        plt.savefig(os.path.join(self.output_dir, "safety_gain_comparison.png"))
+        
+        df.to_csv(os.path.join(self.output_dir, "safety_results.csv"))
+        self.experiment.end()
+        print(f"\n✅ Done! Safety Gain: {safety_gain:.1f}% increase in reliable detections.")
 
 if __name__ == "__main__":
-    run_validation()
+    evaluator = SafetyPerformanceEvaluator()
+    evaluator.run_evaluation(num_samples=50)

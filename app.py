@@ -3,13 +3,12 @@ import torch
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from PIL import Image
 
 from model import AdaLOLIE_Net
 
 # CONFIGURATION
 MODEL_PATH = "checkpoints/adalolie_best.pth"
-YOLO_MODEL = "yolov8n.pt" 
+YOLO_MODEL = "yolov8n.pt"
 
 class AdaLOLIE_SafetyMonitorApp:
     def __init__(self):
@@ -20,7 +19,7 @@ class AdaLOLIE_SafetyMonitorApp:
     @st.cache_resource
     def load_models():
         """
-        Loads models with caching. 
+        Loads models with caching.
         Static method prevents 'self' from breaking the cache hash.
         """
         # 1. Load AdaLOLIE (Enhancer)
@@ -50,17 +49,18 @@ class AdaLOLIE_SafetyMonitorApp:
         """Core logic: Pre-process -> Enhance -> Detect -> Post-process"""
         # Convert uploaded file to OpenCV format
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        original_img = cv2.imdecode(file_bytes, 1)
-        original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        img_bgr = cv2.imdecode(file_bytes, 1)
+        # 1. Convert to RGB for the entire pipeline
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         
         # Capture Original Dimensions
-        h, w, _ = original_img.shape
+        h, w, _ = img_rgb.shape
         
         # ENHANCEMENT PIPELINE
         
         # 1. Resize for Model Inference Only
         inference_size = (512, 512)
-        resized_img = cv2.resize(original_img, inference_size)
+        resized_img = cv2.resize(img_rgb, inference_size)
         
         # 2. ENHANCE
         img_tensor = (resized_img / 255.0).astype(np.float32)
@@ -74,17 +74,17 @@ class AdaLOLIE_SafetyMonitorApp:
         enhanced_small = (enhanced_small * 255).astype(np.uint8)
         
         # 3. Restore to High Resolution
-        enhanced_high_res = cv2.resize(enhanced_small, (w, h))
+        enhanced_high_res_rgb = cv2.resize(enhanced_small, (w, h))
         
         # DETECTION PIPELINE
         
         # 4. DETECT (Original High-Res)
-        results_org = self.detector(original_img, verbose=False)
+        results_org = self.detector(img_rgb, verbose=False)
         org_plotted = results_org[0].plot()
         org_count = len(results_org[0].boxes)
         
         # 5. DETECT (Enhanced High-Res)
-        results_enh = self.detector(enhanced_high_res, verbose=False)
+        results_enh = self.detector(enhanced_high_res_rgb, verbose=False)
         enh_plotted = results_enh[0].plot()
         enh_count = len(results_enh[0].boxes)
         

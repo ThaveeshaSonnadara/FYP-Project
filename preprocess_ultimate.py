@@ -53,36 +53,28 @@ def add_dust_and_mist(image, density):
     
     return cv2.addWeighted(image, 1 - density, dust_layer, density, 0)
 
+def add_motion_blur(image, kernel_size=15):
+    """Simulates camera/equipment motion"""
+    kernel = np.zeros((kernel_size, kernel_size))
+    kernel[int((kernel_size-1)/2), :] = np.ones(kernel_size)
+    kernel = kernel / kernel_size
+    return cv2.filter2D(image, -1, kernel)
+
 def apply_random_degradation(image):
-    """The 'Mixer' Logic: Randomly applies effects with RANDOM intensities"""
-    roll = random.random() # 0.0 to 1.0
+    """Enhanced with 5 degradation types"""
+    roll = random.random()
     
-    if roll < 0.30:
-        # 30% - Just Dark (Black Shift)
-        # Random intensity between 0.1 and 0.4
-        int_val = random.uniform(0.1, 0.4)
-        return add_coal_black_shift(image, intensity=int_val)
-    
-    elif roll < 0.60:
-        # 30% - Just Dusty (Mist)
-        # Random density between 0.09 and 0.3
-        den_val = random.uniform(0.09, 0.3)
-        return add_dust_and_mist(image, density=den_val)
-    
-    elif roll < 0.90:
-        # 30% - BOTH (Hard Mode)
-        # Using slightly lower ranges here so the combination doesn't destroy the image
-        int_val = random.uniform(0.1, 0.3)  # Slightly less dark
-        den_val = random.uniform(0.05, 0.2) # Slightly less mist
-        
-        dark = add_coal_black_shift(image, intensity=int_val)
-        return add_dust_and_mist(dark, density=den_val)
-    
-    else:
-        # 10% - Original (Control) - Very slight darkening
-        # Just enough to make it not "perfectly" bright
-        int_val = random.uniform(0.05, 0.15)
-        return add_coal_black_shift(image, intensity=int_val)
+    if roll < 0.20:   # Dark
+        return add_coal_black_shift(image, random.uniform(0.1, 0.4))
+    elif roll < 0.40: # Dust
+        return add_dust_and_mist(image, random.uniform(0.09, 0.3))
+    elif roll < 0.60: # Both (Hard Mode)
+        dark = add_coal_black_shift(image, random.uniform(0.1, 0.3))
+        return add_dust_and_mist(dark, random.uniform(0.05, 0.2))
+    elif roll < 0.80: # NEW: Motion Blur
+        return add_motion_blur(image, kernel_size=random.randint(9, 21))
+    else:             # Control
+        return add_coal_black_shift(image, random.uniform(0.05, 0.15))
 
 # --- MAIN PROCESSING ---
 def process_and_split():
