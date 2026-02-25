@@ -21,10 +21,10 @@ except ImportError:
 from src.model import AdaLOLIE_Net
 
 # --- CONFIG ---
-MODEL_PATH = "checkpoints/adalolie_best.pth"
-TEST_DIR = "Data/MiningMix_Unified/test" # Ground Truth source
+MODEL_PATH = "../checkpoints/adalolie_best.pth"
+TEST_DIR = "../Data/MiningMix_Unified/test" # Ground Truth source
 NUM_TEST_IMAGES = 100
-SAVE_PTH = "Output/Evaluation Metrics/"
+SAVE_PTH = "../Output/Evaluation Metrics/"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 if not os.path.exists(SAVE_PTH):

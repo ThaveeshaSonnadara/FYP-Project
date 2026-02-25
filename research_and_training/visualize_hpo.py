@@ -61,7 +61,7 @@ def generate_parallel_coordinates_plot(study_name="adalolie_hpo_study", storage=
     )
 
     # 4. Save the plot
-    output_dir = "Output/Safety_Report"
+    output_dir = "../Output/Safety_Report"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         

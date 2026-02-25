@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 # --- CONFIGURATION ---
-OUTPUT_ROOT = "Data/MiningMix_Unified"
+OUTPUT_ROOT = "../Data/MiningMix_Unified"
 TARGET_SIZE = (256, 256) # <--- LOCKED TO 256 (Best for Speed/RO4)
 
 # Dataset Allocations (Total ~15,000)
@@ -88,7 +88,7 @@ def process_and_split():
 
     # 2. Gather & Process DsDPM
     print("🔵 Processing DsDPM (Recursive Scan)...")
-    dsdpm_files = glob.glob(os.path.join("Data/DsDPM_Original", "**", "*.*"), recursive=True)
+    dsdpm_files = glob.glob(os.path.join("../Data/DsDPM_Original", "**", "*.*"), recursive=True)
     valid_dsdpm = [f for f in dsdpm_files if f.lower().endswith(('.jpg', '.png'))]
     
     if len(valid_dsdpm) > COUNTS['dsdpm']:
@@ -102,7 +102,7 @@ def process_and_split():
 
     # 3. Gather & Process ImageMine
     print("🔵 Processing ImageMine...")
-    imgmine_files = glob.glob(os.path.join("Data/ImageMine_Split/train", "**", "*.*"), recursive=True)
+    imgmine_files = glob.glob(os.path.join("../Data/ImageMine_Split/train", "**", "*.*"), recursive=True)
     valid_imgmine = [f for f in imgmine_files if f.lower().endswith(('.jpg', '.png'))]
     
     for f in tqdm(valid_imgmine, desc="ImageMine"):
