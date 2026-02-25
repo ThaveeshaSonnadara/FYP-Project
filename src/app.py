@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from model import AdaLOLIE_Net
+from src.model import AdaLOLIE_Net
 
 # CONFIGURATION
 MODEL_PATH = "checkpoints/adalolie_best.pth"

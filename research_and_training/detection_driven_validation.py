@@ -10,10 +10,10 @@ from tqdm import tqdm
 import comet_ml
 
 # Import local modules
-from model import AdaLOLIE_Net
+from src.model import AdaLOLIE_Net
 
 class SafetyPerformanceEvaluator:
-    def __init__(self, model_path="checkpoints/adalolie_best.pth", yolo_path="yolov8n.pt"):
+    def __init__(self, model_path="../checkpoints/adalolie_best.pth", yolo_path="../yolov8n.pt"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # 1. Load AdaLOLIE Enhancer (Dual-Attention Aware)
@@ -33,8 +33,8 @@ class SafetyPerformanceEvaluator:
         
         # Target classes (0 = 'person' in COCO). Adjust if using custom mining weights.
         self.target_classes = [0] 
-        self.test_dir = "Data/MiningMix_Unified/test"
-        self.output_dir = "Output/Safety_Report"
+        self.test_dir = "../Data/MiningMix_Unified/test"
+        self.output_dir = "../Output/Safety Performance Report"
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 

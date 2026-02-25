@@ -5,7 +5,7 @@ from comet_ml.integration.pytorch import watch, log_model
 import torch
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from torch.cuda.amp import autocast, GradScaler  # NEW: AMP imports
+from torch.amp import autocast, GradScaler  # NEW: AMP imports
 import cv2
 import glob
 import os
@@ -13,7 +13,7 @@ import numpy as np
 from tqdm import tqdm
 
 # Import Local Modules
-from model import AdaLOLIE_Net
+from src.model import AdaLOLIE_Net
 from loss_functions import AdaLOLIELoss
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
@@ -50,13 +50,11 @@ class TrainScript:
         self.BATCH_SIZE = 16
         self.LEARNING_RATE = 1e-4
         self.NUM_EPOCHS = 30
-        self.SAVE_DIR = "checkpoints"
-        self.LOG_FILE = "training_log.csv"
-        self.RESUME_CHECKPOINT = os.path.join(self.SAVE_DIR, "latest_checkpoint.pth")
+        self.SAVE_DIR = "../checkpoints"
         
-        self.TRAIN_PATH = "Data/MiningMix_Unified/train"
-        self.VAL_PATH = "Data/MiningMix_Unified/val"
-        self.TEST_PATH = "Data/MiningMix_Unified/test"
+        self.TRAIN_PATH = "../Data/MiningMix_Unified/train"
+        self.VAL_PATH = "../Data/MiningMix_Unified/val"
+        self.TEST_PATH = "../Data/MiningMix_Unified/test"
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.ACCUMULATION_STEPS = 4
@@ -203,7 +201,7 @@ class TrainScript:
                 
                 # NEW: Mixed Precision Training Block
                 if scaler is not None:
-                    with autocast():  # FP16 operations
+                    with autocast(device_type="cuda"):  # FP16 operations
                         enhanced = model(imgs)
                         loss = loss_fn(enhanced, imgs)
                         loss = loss / self.ACCUMULATION_STEPS
@@ -243,7 +241,7 @@ class TrainScript:
                     imgs = imgs.to(self.device)
                     
                     if scaler is not None:
-                        with autocast():
+                        with autocast(device_type="cuda"):
                             val_loss += loss_fn(model(imgs), imgs).item()
                     else:
                         val_loss += loss_fn(model(imgs), imgs).item()

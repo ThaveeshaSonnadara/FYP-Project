@@ -1,9 +1,0 @@
-AdaLOLIE Evaluation Report
-==========================
-Test-Time Augmentation: False
-Images Tested: 100
-Avg PSNR: 12.98 dB
-Avg SSIM: 0.5592
-Avg PSNR Improvement: -10.80 dB
-Avg SSIM Improvement: -0.3659
-Avg Time: 62.90 ms

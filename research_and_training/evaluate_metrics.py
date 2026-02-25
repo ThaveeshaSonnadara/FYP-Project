@@ -18,7 +18,7 @@ except ImportError:
     print("⚠️ 'piq' library not found. Run: pip install piq")
     HAS_PIQ = False
 
-from model import AdaLOLIE_Net
+from src.model import AdaLOLIE_Net
 
 # --- CONFIG ---
 MODEL_PATH = "checkpoints/adalolie_best.pth"
