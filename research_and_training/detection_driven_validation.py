@@ -61,11 +61,11 @@ class SafetyPerformanceEvaluator:
         
         return img_rgb, enhanced_high_res
 
-    def run_evaluation(self, num_samples=50):
+    def run_evaluation(self, num_samples=None):
         image_files = glob.glob(os.path.join(self.test_dir, "*.*"))
         image_files = [f for f in image_files if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
         
-        if len(image_files) > num_samples:
+        if num_samples is not None and len(image_files) > num_samples:
             image_files = np.random.choice(image_files, num_samples, replace=False)
             
         results_data = []
@@ -114,4 +114,4 @@ class SafetyPerformanceEvaluator:
 
 if __name__ == "__main__":
     evaluator = SafetyPerformanceEvaluator()
-    evaluator.run_evaluation(num_samples=50)
+    evaluator.run_evaluation()

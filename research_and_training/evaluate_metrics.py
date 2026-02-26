@@ -23,7 +23,8 @@ from src.model import AdaLOLIE_Net
 # --- CONFIG ---
 MODEL_PATH = "../checkpoints/adalolie_best.pth"
 TEST_DIR = "../Data/MiningMix_Unified/test" # Ground Truth source
-NUM_TEST_IMAGES = 100
+# NUM_TEST_IMAGES = 100
+NUM_TEST_IMAGES = None
 SAVE_PTH = "../Output/Evaluation Metrics/"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -96,8 +97,11 @@ def evaluate(use_tta=True):
     model.eval()
 
     all_files = glob.glob(os.path.join(TEST_DIR, "**", "*.jpg"), recursive=True)
-    if len(all_files) > NUM_TEST_IMAGES:
+    
+    if NUM_TEST_IMAGES is not None and len(all_files) > NUM_TEST_IMAGES:
         all_files = np.random.choice(all_files, NUM_TEST_IMAGES, replace=False)
+    
+    print(f"📊 Testing {len(all_files)} images with Random Degradation & NR Metrics...")
 
     psnr_scores, ssim_scores, inference_times = [], [], []
     psnr_imp, ssim_imp = [], []
