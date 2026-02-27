@@ -1,11 +1,10 @@
-# 1. Comet Integration Imports
 import comet_ml
-from comet_ml.integration.pytorch import watch, log_model
+# from comet_ml.integration.pytorch import watch, log_model
 
 import torch
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from torch.amp import autocast, GradScaler  # NEW: AMP imports
+from torch.amp import autocast, GradScaler
 import cv2
 import glob
 import os
