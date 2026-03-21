@@ -10,7 +10,7 @@ from tqdm import tqdm
 import comet_ml
 
 # Import local modules
-from src.model import AdaLOLIE_Net
+from model_zero_dce_based import AdaLOLIE_Net
 
 class SafetyPerformanceEvaluator:
     def __init__(self, model_path="../checkpoints/adalolie_best.pth", yolo_path="../yolov8n.pt"):

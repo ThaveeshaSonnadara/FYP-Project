@@ -11,6 +11,20 @@ class AdaLOLIELoss(nn.Module):
         self.register_buffer("k_up", torch.tensor([[0, -1, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
         self.register_buffer("k_down", torch.tensor([[0, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
 
+    # --- NEW: Illumination Smoothness Loss from original Zero-DCE ---
+    def get_illumination_smoothness_loss(self, x_r):
+        batch_size = x_r.size()[0]
+        h_x = x_r.size()[2]
+        w_x = x_r.size()[3]
+        count_h = (x_r.size()[2]-1) * x_r.size()[3]
+        count_w = x_r.size()[2] * (x_r.size()[3] - 1)
+        
+        # Calculates the squared difference between neighboring pixels in the curve map
+        h_tv = torch.pow((x_r[:,:,1:,:] - x_r[:,:,:h_x-1,:]), 2).sum()
+        w_tv = torch.pow((x_r[:,:,:,1:] - x_r[:,:,:,:w_x-1]), 2).sum()
+        
+        return 2 * (h_tv/count_h + w_tv/count_w) / batch_size
+
     def get_exposure_loss(self, enhanced, patch_size=16, mean_val=0.50): 
         pool = nn.AvgPool2d(patch_size)
         mean_curr = pool(enhanced)
@@ -29,12 +43,10 @@ class AdaLOLIELoss(nn.Module):
         enh_p = pool(enhanced)
         org_p = pool(original)
         
-        # Grayscale conversion for edge detection
         enh_g = 0.299*enh_p[:,0,:,:] + 0.587*enh_p[:,1,:,:] + 0.114*enh_p[:,2,:,:]
         org_g = 0.299*org_p[:,0,:,:] + 0.587*org_p[:,1,:,:] + 0.114*org_p[:,2,:,:]
         enh_g, org_g = enh_g.unsqueeze(1), org_g.unsqueeze(1)
 
-        # Masking out pure black background to focus on objects
         mask = (org_g > 0.02).float()
 
         d_left = torch.pow(F.conv2d(org_g, self.k_left, padding=1) - F.conv2d(enh_g, self.k_left, padding=1), 2)
@@ -43,7 +55,6 @@ class AdaLOLIELoss(nn.Module):
         d_down = torch.pow(F.conv2d(org_g, self.k_down, padding=1) - F.conv2d(enh_g, self.k_down, padding=1), 2)
         
         masked_diff = (d_left + d_right + d_up + d_down) * mask
-        # Normalizing by mask area instead of total image area
         return torch.sum(masked_diff) / (torch.sum(mask) + 1e-8)
 
     def get_grayscale_loss(self, enhanced):
@@ -53,13 +64,16 @@ class AdaLOLIELoss(nn.Module):
     def get_glare_loss(self, enhanced, limit=0.85):
         return torch.mean(F.relu(enhanced - limit))
 
-    def forward(self, enhanced, original):
+    # --- UPDATED: Forward pass now accepts x_r ---
+    def forward(self, enhanced, original, x_r):
         L_exp = self.get_exposure_loss(enhanced)
         L_col = self.get_color_loss(enhanced)
         L_spa = self.get_spatial_loss(enhanced, original) 
         L_tv = self.get_grayscale_loss(enhanced)
         L_glare = self.get_glare_loss(enhanced)
+        
+        # Calculate the new smoothness loss
+        L_smooth = self.get_illumination_smoothness_loss(x_r)
 
-        # Custom finetuned weights for each loss function by running multiple debug training runs
-        # return 8*L_exp + 0.5*L_col + 5*L_spa + 2*L_tv + 10*L_glare
-        return (5.6544170561259985)*L_exp + (4.878684619944904)*L_col + (7.342294291341039)*L_spa + (4.323741044348837)*L_tv + (9.535805235859119)*L_glare
+        # I added a baseline weight of 10.0 for L_smooth. You may want to tune this in Optuna later!
+        return (5.65)*L_exp + (4.87)*L_col + (7.34)*L_spa + (4.32)*L_tv + (9.53)*L_glare + (10.0)*L_smooth

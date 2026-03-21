@@ -18,12 +18,11 @@ except ImportError:
     print("⚠️ 'piq' library not found. Run: pip install piq")
     HAS_PIQ = False
 
-from src.model import AdaLOLIE_Net
+from model_zero_dce_based import AdaLOLIE_Net
 
 # --- CONFIG ---
 MODEL_PATH = "../checkpoints/adalolie_best.pth"
 TEST_DIR = "../Data/MiningMix_Unified/test" # Ground Truth source
-# NUM_TEST_IMAGES = 100
 NUM_TEST_IMAGES = None
 SAVE_PTH = "../Output/Evaluation Metrics/"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -31,7 +30,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if not os.path.exists(SAVE_PTH):
     os.makedirs(SAVE_PTH)
 
-# --- REALISTIC DEGRADATION FUNCTIONS (Matches Training!) ---
+# --- REALISTIC DEGRADATION FUNCTIONS ---
 def add_coal_black_shift(image, intensity):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(hsv)
@@ -62,19 +61,23 @@ def apply_random_degradation(image):
 def apply_tta(model, img_tensor, device):
     predictions = []
     with torch.no_grad():
-        pred = model(img_tensor)
+        # UPDATE: Unpack tuple across all 4 TTA passes
+        pred, _ = model(img_tensor)
         predictions.append(pred)
         
         flipped_h = torch.flip(img_tensor, dims=[3])
-        pred_h = torch.flip(model(flipped_h), dims=[3])
+        pred_h_raw, _ = model(flipped_h)
+        pred_h = torch.flip(pred_h_raw, dims=[3])
         predictions.append(pred_h)
         
         flipped_v = torch.flip(img_tensor, dims=[2])
-        pred_v = torch.flip(model(flipped_v), dims=[2])
+        pred_v_raw, _ = model(flipped_v)
+        pred_v = torch.flip(pred_v_raw, dims=[2])
         predictions.append(pred_v)
         
         rotated = torch.rot90(img_tensor, k=1, dims=[2, 3])
-        pred_rot = torch.rot90(model(rotated), k=-1, dims=[2, 3])
+        pred_rot_raw, _ = model(rotated)
+        pred_rot = torch.rot90(pred_rot_raw, k=-1, dims=[2, 3])
         predictions.append(pred_rot)
         
     return torch.mean(torch.stack(predictions), dim=0)
@@ -109,8 +112,6 @@ def evaluate(use_tta=True):
     brisque_raw, brisque_enh = [], []
     sample_vis = None
 
-    print(f"📊 Testing {len(all_files)} images with Random Degradation & NR Metrics...")
-
     for img_path in tqdm(all_files):
         try:
             clean_raw = cv2.imread(img_path)
@@ -119,7 +120,6 @@ def evaluate(use_tta=True):
             clean = cv2.resize(clean_raw, (256, 256))
             dirty = apply_random_degradation(clean.copy())
             
-            # Convert to RGB and prepare Tensor
             dirty_rgb = cv2.cvtColor(dirty, cv2.COLOR_BGR2RGB)
             img_tensor = (dirty_rgb / 255.0).astype(np.float32)
             img_tensor = torch.from_numpy(img_tensor).permute(2, 0, 1).unsqueeze(0).to(DEVICE)
@@ -130,15 +130,16 @@ def evaluate(use_tta=True):
                 enhanced_tensor = apply_tta(model, img_tensor, DEVICE)
             else:
                 with torch.no_grad():
-                    enhanced_tensor = model(img_tensor)
+                    # UPDATE: Ignore x_r
+                    enhanced_tensor, _ = model(img_tensor)
             end_time = time.time()
             inference_times.append((end_time - start_time) * 1000)
 
-            # Post-Process for Reference Metrics
+            # Post-Process
             enhanced_np = enhanced_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
             enhanced_bgr = cv2.cvtColor((np.clip(enhanced_np * 255, 0, 255)).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
-            # --- REFERENCE METRICS (PSNR/SSIM) ---
+            # --- REFERENCE METRICS ---
             psnr_c = psnr(clean, enhanced_bgr)
             ssim_c = ssim(clean, enhanced_bgr, channel_axis=2, data_range=255)
             psnr_scores.append(psnr_c)
@@ -146,10 +147,9 @@ def evaluate(use_tta=True):
             psnr_imp.append(psnr_c - psnr(clean, dirty))
             ssim_imp.append(ssim_c - ssim(clean, dirty, channel_axis=2, data_range=255))
             
-            # --- NO-REFERENCE METRICS using PIQ ---
+            # --- NO-REFERENCE METRICS ---
             if HAS_PIQ:
                 with torch.no_grad():
-                    # PIQ expects tensors in [0, 1] range
                     enhanced_clamped = enhanced_tensor.clamp(0, 1)
                     
                     n_raw = niqe(img_tensor, data_range=1.0).item()
@@ -169,7 +169,6 @@ def evaluate(use_tta=True):
 
     # --- CALCULATE AVERAGES ---
     avg_psnr, avg_ssim, avg_speed = np.mean(psnr_scores), np.mean(ssim_scores), np.mean(inference_times)
-    
     avg_n_raw, avg_n_enh = np.mean(niqe_raw) if niqe_raw else 0, np.mean(niqe_enh) if niqe_enh else 0
     avg_b_raw, avg_b_enh = np.mean(brisque_raw) if brisque_raw else 0, np.mean(brisque_enh) if brisque_enh else 0
 

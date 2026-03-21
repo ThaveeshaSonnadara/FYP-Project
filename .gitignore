@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 
 # Ignore datasets
+Data/*
 Data/MiningMix_Unified/train/*
 Data/MiningMix_Unified/test/*
 Data/MiningMix_Unified/val/*
