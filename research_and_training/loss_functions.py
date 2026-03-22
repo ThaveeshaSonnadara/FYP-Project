@@ -64,16 +64,35 @@ class AdaLOLIELoss(nn.Module):
     def get_glare_loss(self, enhanced, limit=0.85):
         return torch.mean(F.relu(enhanced - limit))
 
-    # --- UPDATED: Forward pass now accepts x_r ---
+    # --- NEW: Image Total Variation Loss (Internal Denoising) ---
+    def get_image_tv_loss(self, x):
+        batch_size = x.size()[0]
+        h_x = x.size()[2]
+        w_x = x.size()[3]
+        count_h = (x.size()[2]-1) * x.size()[3]
+        count_w = x.size()[2] * (x.size()[3] - 1)
+        
+        # Penalizes chaotic, noisy pixel jumps in the final enhanced image
+        h_tv = torch.pow((x[:,:,1:,:] - x[:,:,:h_x-1,:]), 2).sum()
+        w_tv = torch.pow((x[:,:,:,1:] - x[:,:,:,:w_x-1]), 2).sum()
+        return 2 * (h_tv/count_h + w_tv/count_w) / batch_size
+
+    # --- UPDATED FORWARD PASS ---
     def forward(self, enhanced, original, x_r):
         L_exp = self.get_exposure_loss(enhanced)
         L_col = self.get_color_loss(enhanced)
-        L_spa = self.get_spatial_loss(enhanced, original) 
-        L_tv = self.get_grayscale_loss(enhanced)
-        L_glare = self.get_glare_loss(enhanced)
         
-        # Calculate the new smoothness loss
+        # We lower the spatial weight so it stops copying the noise from the dark image
+        L_spa = self.get_spatial_loss(enhanced, original) 
+        
+        L_gray = self.get_grayscale_loss(enhanced)
+        L_glare = self.get_glare_loss(enhanced)
         L_smooth = self.get_illumination_smoothness_loss(x_r)
+        
+        # Calculate the new internal denoiser
+        L_image_tv = self.get_image_tv_loss(enhanced)
 
-        # I added a baseline weight of 10.0 for L_smooth. You may want to tune this in Optuna later!
-        return (5.65)*L_exp + (4.87)*L_col + (7.34)*L_spa + (4.32)*L_tv + (9.53)*L_glare + (10.0)*L_smooth
+        # REBALANCED WEIGHTS: 
+        # We cranked up L_col to fix the purple/green banding.
+        # We added massive weight (20.0) to L_image_tv to violently suppress the static.
+        return (5.65)*L_exp + (10.0)*L_col + (7.34)*L_spa + (4.32)*L_gray + (9.53)*L_glare + (10.0)*L_smooth + (0.5)*L_image_tv

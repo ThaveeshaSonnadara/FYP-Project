@@ -54,10 +54,10 @@ class TrainScript:
         self.TEST_PATH = "/content/MiningMix_Unified/test"
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.ACCUMULATION_STEPS = 4
+        self.ACCUMULATION_STEPS = 1
         
         # Early Stopping Configuration
-        self.PATIENCE = 5  
+        self.PATIENCE = 15
         self.MIN_DELTA = 0.001  
 
     def run_test_evaluation(self, model):
@@ -100,8 +100,8 @@ class TrainScript:
         loss_fn = AdaLOLIELoss().to(self.device) 
         optimizer = torch.optim.Adam(model.parameters(), lr=self.LEARNING_RATE)
         
-        train_loader = DataLoader(MiningDataset(self.TRAIN_PATH, limit=200), batch_size=self.BATCH_SIZE, shuffle=True)
-        val_loader = DataLoader(MiningDataset(self.VAL_PATH, limit=50), batch_size=self.BATCH_SIZE, shuffle=False)
+        train_loader = DataLoader(MiningDataset(self.TRAIN_PATH), batch_size=self.BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(MiningDataset(self.VAL_PATH), batch_size=self.BATCH_SIZE, shuffle=False)
 
         best_trial_ssim = 0.0
 
@@ -190,8 +190,8 @@ class TrainScript:
         else:
             print("🆕 Starting training from scratch...")
         
-        train_loader = DataLoader(MiningDataset(self.TRAIN_PATH, limit=250), batch_size=self.BATCH_SIZE, shuffle=True)
-        val_loader = DataLoader(MiningDataset(self.VAL_PATH, limit=50), batch_size=self.BATCH_SIZE, shuffle=False)
+        train_loader = DataLoader(MiningDataset(self.TRAIN_PATH), batch_size=self.BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(MiningDataset(self.VAL_PATH), batch_size=self.BATCH_SIZE, shuffle=False)
 
         for epoch in range(start_epoch, self.NUM_EPOCHS+1):
             # --- TRAINING PHASE ---

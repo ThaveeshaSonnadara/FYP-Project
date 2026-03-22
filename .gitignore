@@ -12,5 +12,5 @@ Data/MiningMix_Unified/val/*
 yolov8n.pt
 
 # Ignore environment files
-venv
+.venv
 .env
