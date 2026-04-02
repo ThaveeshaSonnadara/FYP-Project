@@ -11,7 +11,7 @@ class AdaLOLIELoss(nn.Module):
         self.register_buffer("k_up", torch.tensor([[0, -1, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
         self.register_buffer("k_down", torch.tensor([[0, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=torch.float32).unsqueeze(0).unsqueeze(0))
 
-    # --- NEW: Illumination Smoothness Loss from original Zero-DCE ---
+    # Illumination Smoothness Loss from original Zero-DCE
     def get_illumination_smoothness_loss(self, x_r):
         batch_size = x_r.size()[0]
         h_x = x_r.size()[2]
@@ -64,7 +64,7 @@ class AdaLOLIELoss(nn.Module):
     def get_glare_loss(self, enhanced, limit=0.85):
         return torch.mean(F.relu(enhanced - limit))
 
-    # --- NEW: Image Total Variation Loss (Internal Denoising) ---
+    # Image Total Variation Loss (Internal Denoising)
     def get_image_tv_loss(self, x):
         batch_size = x.size()[0]
         h_x = x.size()[2]
@@ -76,23 +76,18 @@ class AdaLOLIELoss(nn.Module):
         h_tv = torch.pow((x[:,:,1:,:] - x[:,:,:h_x-1,:]), 2).sum()
         w_tv = torch.pow((x[:,:,:,1:] - x[:,:,:,:w_x-1]), 2).sum()
         return 2 * (h_tv/count_h + w_tv/count_w) / batch_size
-
-    # --- UPDATED FORWARD PASS ---
+    
+    # FORWARD PASS (TEXTURE PROTECTION)
     def forward(self, enhanced, original, x_r):
-        L_exp = self.get_exposure_loss(enhanced)
+        # Target a darker overall scene (0.35) so the miner doesn't get blinded
+        L_exp = self.get_exposure_loss(enhanced, mean_val=0.35)
         L_col = self.get_color_loss(enhanced)
-        
-        # We lower the spatial weight so it stops copying the noise from the dark image
-        L_spa = self.get_spatial_loss(enhanced, original) 
-        
-        L_gray = self.get_grayscale_loss(enhanced)
-        L_glare = self.get_glare_loss(enhanced)
+        L_spa = self.get_spatial_loss(enhanced, original)
         L_smooth = self.get_illumination_smoothness_loss(x_r)
         
-        # Calculate the new internal denoiser
-        L_image_tv = self.get_image_tv_loss(enhanced)
-
-        # REBALANCED WEIGHTS: 
-        # We cranked up L_col to fix the purple/green banding.
-        # We added massive weight (20.0) to L_image_tv to violently suppress the static.
-        return (5.65)*L_exp + (10.0)*L_col + (7.34)*L_spa + (4.32)*L_gray + (9.53)*L_glare + (10.0)*L_smooth + (0.5)*L_image_tv
+        # THE PROTECTIVE WEIGHTS:
+        # - L_exp cut in half (5.0) to stop the flashbang effect.
+        # - L_col bumped to 1.0 to keep the natural tunnel colors.
+        # - L_spa cranked to 10.0 to fiercely protect the texture of the miner's suit.
+        # - L_smooth remains at 200.0 to keep the static dead.
+        return (5.0)*L_exp + (1.0)*L_col + (10.0)*L_spa + (200.0)*L_smooth

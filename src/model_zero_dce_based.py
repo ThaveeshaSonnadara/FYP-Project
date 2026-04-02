@@ -34,48 +34,31 @@ class AdaLOLIE_Net(nn.Module):
     def __init__(self):
         super(AdaLOLIE_Net, self).__init__()
         nf = 32
-        
-        # --- The Zero-DCE Feature Extraction ---
         self.e_conv1 = nn.Conv2d(3, nf, 3, 1, 1)
         self.e_conv2 = nn.Conv2d(nf, nf, 3, 1, 1)
         self.e_conv3 = nn.Conv2d(nf, nf, 3, 1, 1)
         self.e_conv4 = nn.Conv2d(nf, nf, 3, 1, 1)
-        
-        # --- Your Custom Dual Attention Module ---
         self.ca = ChannelAttention(nf)
         self.sa = SpatialAttention()
-        
-        # --- The Zero-DCE Symmetrical Concatenation Decoder ---
-        # Note: Input channels are doubled (nf * 2) because we concatenate skip connections
         self.e_conv5 = nn.Conv2d(nf * 2, nf, 3, 1, 1)
         self.e_conv6 = nn.Conv2d(nf * 2, nf, 3, 1, 1)
         self.e_conv7 = nn.Conv2d(nf * 2, 24, 3, 1, 1)
-        
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        # 1. Extract Features
         x1 = self.relu(self.e_conv1(x))
         x2 = self.relu(self.e_conv2(x1))
         x3 = self.relu(self.e_conv3(x2))
         x4 = self.relu(self.e_conv4(x3))
-        
-        # 2. Apply Dual Attention at the Bottleneck
-        # This isolates the localized bright spots (e.g., headlamps) and scales their feature weights
         x4 = self.ca(x4) * x4
         x4 = self.sa(x4) * x4
-        
-        # 3. Symmetrical Skip Connections (Restoring original Zero-DCE structural preservation)
         x5 = self.relu(self.e_conv5(torch.cat([x3, x4], dim=1)))
         x6 = self.relu(self.e_conv6(torch.cat([x2, x5], dim=1)))
-        
-        # 4. Final Curve Parameter Generation
         x_r = torch.tanh(self.e_conv7(torch.cat([x1, x6], dim=1)))
         
-        # 5. Iterative Enhancement Application
         enhanced = x
         for i in range(8):
             r = x_r[:, i*3:(i+1)*3, :, :]
-            enhanced = enhanced + r * (torch.pow(enhanced, 2) - enhanced)
+            enhanced = enhanced + r * (enhanced - torch.pow(enhanced, 2))
             
         return enhanced, x_r

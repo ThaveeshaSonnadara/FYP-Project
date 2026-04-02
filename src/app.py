@@ -9,16 +9,22 @@ from datetime import datetime
 from ultralytics import YOLO
 import pymongo
 from fpdf import FPDF
+from dotenv import load_dotenv
 
-# Import your custom network
+load_dotenv()
+
 from model_zero_dce_based import AdaLOLIE_Net
 
-# --- CONFIGURATION ---
-MODEL_PATH = "checkpoints/adalolie_best.pth"
-YOLO_MODEL = "yolov8n.pt"
+# CONFIGURATION
+MODEL_PATH = "weights/adalolie_best.pth"
+YOLO_MODEL = "weights/best.pt"
+# YOLO_MODEL = "yolov8n.pt"
+
+username = os.getenv('DB_USER')
+password = os.getenv('DB_PASSWORD')
 
 # MongoDB Configuration
-MONGO_URI = "mongodb+srv://sonnadarathaveesha_db_user:<db_password>@fyp-cluster0.uszdvma.mongodb.net/?appName=FYP-Cluster0"
+MONGO_URI = f"mongodb+srv://{username}:{password}@fyp-cluster0.uszdvma.mongodb.net/?appName=FYP-Cluster0"
 DB_NAME = "adalolie_safety_system"
 COLLECTION_NAME = "incident_logs"
 
@@ -63,18 +69,26 @@ class AdaLOLIE_SafetyMonitorApp:
         except pymongo.errors.ServerSelectionTimeoutError:
             st.sidebar.warning("⚠️ MongoDB is not running. Audit logging is disabled.")
             return None
+        
+    def apply_clahe(self, img_rgb):
+        """Mandatory pre-processing to match training signal."""
+        lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        merged = cv2.merge((l, a, b))
+        return cv2.cvtColor(merged, cv2.COLOR_LAB2RGB)
 
     def process_image(self, uploaded_file):
-        """Core logic: Pre-process -> Enhance -> Detect -> Post-process"""
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img_bgr = cv2.imdecode(file_bytes, 1)
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        
         h, w, _ = img_rgb.shape
         
-        # 1. Resize for Inference
-        inference_size = (512, 512)
-        resized_img = cv2.resize(img_rgb, inference_size)
+        # 1. Pipeline Matching: Pre-lift signal with CLAHE
+        lifted_img = self.apply_clahe(img_rgb)
+        resized_img = cv2.resize(lifted_img, (640, 640))
+        # resized_img = cv2.resize(img_rgb, (640, 640))
         
         # 2. Enhance
         img_tensor = (resized_img / 255.0).astype(np.float32)
@@ -90,16 +104,23 @@ class AdaLOLIE_SafetyMonitorApp:
         # 3. Restore to High Resolution
         enhanced_high_res_rgb = cv2.resize(enhanced_small, (w, h))
         
-        # 4. Parallel Detection
-        results_org = self.detector(img_rgb, verbose=False)
-        org_plotted = results_org[0].plot()
+        # 4. Detection (THE BUG FIX)
+        # We must pass the BGR arrays to YOLO, and we add conf=0.15 to match your tests.
+        
+        # A. Raw Detection
+        results_org = self.detector(img_bgr, verbose=False, conf=0.15) 
+        org_plotted_bgr = results_org[0].plot()
+        org_plotted_rgb = cv2.cvtColor(org_plotted_bgr, cv2.COLOR_BGR2RGB) # Convert back for Streamlit
         org_count = len(results_org[0].boxes)
         
-        results_enh = self.detector(enhanced_high_res_rgb, verbose=False)
-        enh_plotted = results_enh[0].plot()
+        # B. Enhanced Detection
+        enhanced_high_res_bgr = cv2.cvtColor(enhanced_high_res_rgb, cv2.COLOR_RGB2BGR)
+        results_enh = self.detector(enhanced_high_res_bgr, verbose=False, conf=0.15)
+        enh_plotted_bgr = results_enh[0].plot()
+        enh_plotted_rgb = cv2.cvtColor(enh_plotted_bgr, cv2.COLOR_BGR2RGB) # Convert back for Streamlit
         enh_count = len(results_enh[0].boxes)
         
-        return org_plotted, enh_plotted, org_count, enh_count
+        return org_plotted_rgb, enh_plotted_rgb, org_count, enh_count
 
     def generate_pdf_report(self, incident_id, timestamp, org_count, enh_count, org_img, enh_img):
         """Generates a downloadable PDF Safety Report."""
@@ -159,16 +180,20 @@ class AdaLOLIE_SafetyMonitorApp:
                 org_img, enh_img, org_count, enh_count = self.process_image(uploaded_file)
                 
             with col1:
-                st.image(org_img, caption=f"Original Input | Detections: {org_count}", width='stretch')
-                if org_count == 0:
-                    st.error("⚠️ SAFETY RISK: No objects detected in raw feed!")
+                container1 = st.container(vertical_alignment='center', horizontal_alignment='center')
+                with container1:
+                    st.image(org_img, caption=f"Original Input | Detections: {org_count}", width=350)
+                    if org_count == 0:
+                        st.error("⚠️ SAFETY RISK: No objects detected in raw feed!")
                     
             with col2:
-                st.image(enh_img, caption=f"AdaLOLIE Output | Detections: {enh_count}", width='stretch')
-                if enh_count > org_count:
-                    st.success(f"✅ SAFETY IMPROVED: +{enh_count - org_count} Objects Found")
-                elif enh_count == org_count and enh_count > 0:
-                    st.info(f"✅ Detection Confirmed")
+                container2 = st.container(vertical_alignment='center', horizontal_alignment='center')
+                with container2:
+                    st.image(enh_img, caption=f"AdaLOLIE Output | Detections: {enh_count}", width=350)
+                    if enh_count > org_count:
+                        st.success(f"✅ SAFETY IMPROVED: +{enh_count - org_count} Objects Found")
+                    elif enh_count == org_count and enh_count > 0:
+                        st.info(f"✅ Detection Confirmed")
                     
             # Metrics Table
             st.table({
