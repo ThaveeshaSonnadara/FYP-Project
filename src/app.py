@@ -17,7 +17,7 @@ from model_zero_dce_based import AdaLOLIE_Net
 
 # CONFIGURATION
 MODEL_PATH = "weights/adalolie_best.pth"
-YOLO_MODEL = "weights/best.pt"
+YOLO_MODEL = "weights/best_latest.pt"
 # YOLO_MODEL = "yolov8n.pt"
 
 username = os.getenv('DB_USER')
