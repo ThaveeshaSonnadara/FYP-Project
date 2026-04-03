@@ -18,3 +18,7 @@ yolov8n.pt
 # Ignore environment files
 .venv
 .env
+Documents/v8s_optimized_6class_768_100e/weights/last.pt
+Documents/v8s_optimized_6class_768_100e/weights/best.pt
+Documents/v8s_optimized_6class_768_100e-20260403T002003Z-3-001.zip
+.vscode/settings.json
